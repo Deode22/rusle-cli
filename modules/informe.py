@@ -33,7 +33,6 @@ class NumberedCanvas(canvas.Canvas):
     """Canvas personalizado para añadir números de página y encabezados"""
 
     def __init__(self, *args, **kwargs):
-        self.area_nombre = kwargs.pop('area_nombre', '')
         self.fecha = kwargs.pop('fecha', '')
         canvas.Canvas.__init__(self, *args, **kwargs)
         self._saved_page_states = []
@@ -287,7 +286,6 @@ def generar_mapa_erosion(raster_path, output_path, bounds=None):
 
 def generar_informe_rusle(
     output_pdf,
-    area_nombre,
     R_value,
     K_array,
     LS_array,
@@ -304,8 +302,6 @@ def generar_informe_rusle(
     -----------
     output_pdf : str
         Ruta del PDF de salida
-    area_nombre : str
-        Nombre del área de estudio
     R_value : float
         Factor de erosividad de la lluvia (MJ·mm/ha·h·año)
     K_array : np.ndarray
@@ -424,7 +420,7 @@ def generar_informe_rusle(
     story = []
     
     # Encabezado
-    story.append(Paragraph(f"Informe de Pérdidas de Suelo - {area_nombre}", style_title))
+    story.append(Paragraph(f"Informe de Pérdidas de Suelo", style_title))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=2))
     story.append(Paragraph(f"{datetime.now().strftime('%d/%m/%Y')}", style_date))
     
@@ -1016,11 +1012,34 @@ def generar_informe_rusle(
             "Figura 2. Mapa de pérdidas de suelo clasificado por niveles de erosión",
             style_caption
         ))
+
+    story.append(PageBreak())
+    story.append(Paragraph("Referencias", style_heading))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=8))
+    story.append(Spacer(1, 0.3*cm))
+
+    referencias = [
+        "Desmet, P. J. J., & Govers, G. (1996). A GIS procedure for automatically calculating the USLE LS factor on topographically complex landscape units. <i>Journal of Soil and Water Conservation, 51</i>(5), 427-433.",
+
+        "Hengl, T., Mendes de Jesus, J., Heuvelink, G. B. M., Ruiperez Gonzalez, M., Kilibarda, M., Blagotić, A., Shangguan, W., Wright, M. N., Geng, X., Bauer-Marschallinger, B., Guevara, M. A., Vargas, R., MacMillan, R. A., Batjes, N. H., Leenaars, J. G. B., Ribeiro, E., Wheeler, I., Mantel, S., & Kempen, B. (2017). SoilGrids250m: Global gridded soil information based on machine learning. <i>PLOS ONE, 12</i>(2), e0169748. https://doi.org/10.1371/journal.pone.0169748",
+
+        "Panagos, P., Ballabio, C., Borrelli, P., Meusburger, K., Klik, A., Rousseva, S., Tadić, M. P., Michaelides, S., Hrabalíková, M., Olsen, P., Aalto, J., Lakatos, M., Rymszewicz, A., Dumitrescu, A., Beguería, S., & Alewell, C. (2015). Rainfall erosivity in Europe. <i>Science of The Total Environment, 511</i>, 801-814. https://doi.org/10.1016/j.scitotenv.2015.01.008",
+
+        "Renard, K. G., Foster, G. R., Weesies, G. A., McCool, D. K., & Yoder, D. C. (1997). <i>Predicting soil erosion by water: A guide to conservation planning with the Revised Universal Soil Loss Equation (RUSLE)</i>. U.S. Department of Agriculture, Agricultural Research Service, Agriculture Handbook No. 703.",
+
+        "Williams, J. R., Jones, C. A., & Dyke, P. T. (1984). A modeling approach to determining the relationship between erosion and soil productivity. <i>Transactions of the ASAE, 27</i>(1), 129-144. https://doi.org/10.13031/2013.32748",
+
+        "Wischmeier, W. H., & Smith, D. D. (1978). <i>Predicting rainfall erosion losses: A guide to conservation planning</i>. U.S. Department of Agriculture, Agriculture Handbook No. 537."
+    ]
+
+    for ref in referencias:
+        p = Paragraph(ref, style_body)
+        story.append(p)
+        story.append(Spacer(1, 0.3*cm))
     
     # Generar PDF
     fecha_actual = datetime.now().strftime('%d/%m/%Y')
     doc.build(story, canvasmaker=lambda *args, **kwargs: NumberedCanvas(*args,
-              area_nombre=area_nombre,
               fecha=fecha_actual,
               **kwargs))
 

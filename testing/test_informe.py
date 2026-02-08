@@ -19,7 +19,6 @@ if __name__ == "__main__":
     
     generar_informe_rusle(
         output_pdf="informe_erosion.pdf",
-        area_nombre="Extremadura",
         R_value=R_value,
         K_array=K_array,
         LS_array=LS_array,

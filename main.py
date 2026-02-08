@@ -117,8 +117,16 @@ def crear_bbox_desde_coordenadas(lat, lon, lado_metros):
 
     Returns:
         GeoDataFrame con el bbox en EPSG:4326
+
+    Note:
+        SoilGrids tiene resolución de 250m, se recomienda lado_metros >= 500m
     """
     from pyproj import Transformer, CRS
+
+    MIN_LADO_RECOMENDADO = 500
+    if lado_metros < MIN_LADO_RECOMENDADO:
+        logger.warning(f"Lado del bbox ({lado_metros}m) es menor que el recomendado ({MIN_LADO_RECOMENDADO}m)")
+        logger.warning(f"   SoilGrids tiene resolución de 250m, bbox pequeños pueden fallar")
 
     utm_zone = int((lon + 180) / 6) + 1
     hemisphere = 'north' if lat >= 0 else 'south'
@@ -202,7 +210,7 @@ def main(capa: str = None, output: str = None, factor_c: list = None, factor_p: 
         LS_manual = cambio_ls
     else:
         logger.info("\n[3/4] Obteniendo MDT y calculando Factor LS...")
-        mdt_result = obtener_mdt(capa)
+        mdt_result = obtener_mdt(gdf)
         elevation = mdt_result['data']
         mdt_transform = mdt_result['transform']
         mdt_crs = mdt_result['crs']
@@ -344,7 +352,6 @@ def main(capa: str = None, output: str = None, factor_c: list = None, factor_p: 
 
         generar_informe_rusle(
             output_pdf=pdf_path,
-            area_nombre=area_nombre,
             R_value=factor_R,
             K_array=K_resampled,
             LS_array=LS_resampled,
@@ -389,8 +396,8 @@ if __name__ == "__main__":
     input_group.add_argument("--coordenadas", "-coords", nargs=2, type=float, metavar=("LAT", "LON"),
                             help="Coordenadas del centro (lat, lon) ej: 40.5723 -4.4033")
 
-    parser.add_argument("--lado-bbox", "-l", type=int, metavar="METROS",
-                       help="Lado del bbox en metros (requerido con --coordenadas). Ej: 100 para 100x100m")
+    parser.add_argument("--lado-bbox", "--lado", type=int, metavar="METROS",
+                       help="Lado del bbox en metros (requerido con --coordenadas). Mínimo recomendado: 500m")
     parser.add_argument("-o", "--output", default=None, help="Ruta de la carpeta de salida (default: Descargas/RUSLE_output_YYYYMMDD)")
     parser.add_argument("-fc", "--factor-c", nargs='*', metavar="VAL", help="Valores de C medio/largo plazo. Sin args: C*0.5/C*0.1. Con args: -fc 0.1 0.02 o -fc _ 0.01")
     parser.add_argument("-p", "--factor-p", type=float, default=1.0, help="Valor del factor P (default: 1.0)")

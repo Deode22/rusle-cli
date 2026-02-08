@@ -46,9 +46,12 @@ def obtener_mdt(
                     sleep(3)
         return r
 
-    gdf = gpd.read_file(geopackage_path)
-
-    logger.info(f"GeoDataFrame cargado: {len(gdf)} filas, CRS: {gdf.crs}")
+    if isinstance(geopackage_path, gpd.GeoDataFrame):
+        gdf = geopackage_path
+        logger.info(f"GeoDataFrame recibido: {len(gdf)} filas, CRS: {gdf.crs}")
+    else:
+        gdf = gpd.read_file(geopackage_path)
+        logger.info(f"GeoDataFrame cargado: {len(gdf)} filas, CRS: {gdf.crs}")
 
     if gdf.crs.to_epsg() != 4326:
         logger.info(f"Reproyectando de {gdf.crs} a EPSG:4326")
