@@ -16,7 +16,9 @@ shapely>=2.0.0
 geopandas>=0.12.0
 pyproj>=3.5.0
 cdsapi>=0.5.1
-xarray>=2023.0.0
+xarray
+pysheds
+owslib>=0.25.0
 
 # Utilidades
 python-dotenv>=1.0.0

@@ -14,9 +14,9 @@ from rasterio.warp import reproject, Resampling
 from rasterio.features import rasterize
 
 from get_mdt import obtener_mdt
-from get_ndvi import obtener_ndvi_valido
-from factor_R import calcular_erosividad_desde_gdf
-from get_K import calculate_factor_K_williams
+from get_C import obtener_ndvi_valido
+from get_R import factorR_wms
+from get_K import factor_K_williams
 from calc_LS import calcular_LS
 
 
@@ -103,13 +103,11 @@ def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0):
     print("=" * 60)
 
     print("\n[1/4] Calculando Factor R (Erosividad)...")
-    CDS_API_KEY = "7314d9c0-2468-4f66-8d21-1bea09c0bccf"
-    r_result = calcular_erosividad_desde_gdf(gdf, CDS_API_KEY, start_year=2010, end_year=2024)
-    R = r_result['R_factor']
-    print(f"  R = {R:.2f} MJ·mm·ha⁻¹·h⁻¹·año⁻¹")
+    _, factor_R = factorR_wms(gdf)
+    print(f"  R = {factor_R:.2f} MJ·mm·ha⁻¹·h⁻¹·año⁻¹")
 
     print("\n[2/4] Calculando Factor K (Erodibilidad del suelo)...")
-    k_result = calculate_factor_K_williams(gdf, depth="0-5cm", stat="mean")
+    k_result = factor_K_williams(gdf, depth="0-5cm", stat="mean")
     K_array = k_result['K']
     K_profile = k_result['profile']
     print(f"  K mean = {np.nanmean(K_array):.4f} t·h/(MJ·mm)")
@@ -161,7 +159,7 @@ def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0):
 
     mascara_gdf = crear_mascara_gdf(gdf, ref_shape, ref_transform, ref_crs)
 
-    A_original = R * K_resampled * LS_resampled * C_array * P
+    A_original = factor_R * K_resampled * LS_resampled * C_array * P
     print("[Eliminando outliers (percentiles 2.5-97.5)...]")
     A_original = eliminar_outliers(A_original)
     print(f"\nEscenario actual (C original): A mean = {np.nanmean(A_original):.4f} t/ha/año")
@@ -192,8 +190,8 @@ def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0):
             c_largo_str = str(c_largo_val)
         C_largo = np.where(mascara_gdf, C_largo, np.nan)
 
-        A_medio = R * K_resampled * LS_resampled * C_medio * P
-        A_largo = R * K_resampled * LS_resampled * C_largo * P
+        A_medio = factor_R * K_resampled * LS_resampled * C_medio * P
+        A_largo = factor_R * K_resampled * LS_resampled * C_largo * P
 
         A_medio = eliminar_outliers(A_medio)
         A_largo = eliminar_outliers(A_largo)
