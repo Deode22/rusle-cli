@@ -5,6 +5,8 @@ a partir de imágenes Sentinel-2 mediante Copernicus Data Space Ecosystem.
 Orientado a zonas forestales, repoblaciones y evaluación de servicios ecosistémicos.
 """
 
+import os
+from dotenv import load_dotenv
 import requests
 import numpy as np
 from datetime import datetime, timedelta
@@ -14,6 +16,8 @@ import geopandas as gpd
 import rasterio
 from io import BytesIO
 import logging
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -200,21 +204,20 @@ def obtener_ndvi_valido(gdf: gpd.GeoDataFrame, dias=90, maxcc=20, width=512, hei
     logger.info("="*60)
     logger.info("OBTENCIÓN DE NDVI Y CÁLCULO DEL FACTOR C")
     logger.info("="*60)
-    
-    # Credenciales (deben proporcionarse de forma segura en producción)
-    if client_id is None:
-        CLIENT_ID = "sh-48cd7ecb-e398-4c07-bf7a-2d0c5df1843e"
 
+    if client_id is None:
+        CLIENT_ID = os.environ.get("CLIENT_ID")
     else:
         CLIENT_ID = client_id
-        
+
     if client_secret is None:
-        CLIENT_SECRET = "WbAGISqNR6XhHyxmVB2qlmPcbdMaHJGZ"
+        CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
     else:
         CLIENT_SECRET = client_secret
-    
+
     if not CLIENT_ID or not CLIENT_SECRET or CLIENT_ID == "sh-":
         logger.error("Credenciales de Copernicus Data Space no configuradas")
+        raise ValueError("Debe proporcionar client_id y client_secret válidos o configurar las variables de entorno CLIENT_ID y CLIENT_SECRET")
         raise ValueError("Debe proporcionar client_id y client_secret válidos")
     
     # Extraer bounding box del GeoDataFrame

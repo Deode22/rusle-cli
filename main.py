@@ -14,11 +14,10 @@ from rasterio.warp import reproject, Resampling
 from rasterio.features import rasterize
 
 from get_mdt import obtener_mdt
-from get_C import obtener_ndvi_valido
-from get_R import factorR_wms
-from get_K import factor_K_williams
-from calc_LS import calcular_LS
-
+from modules.get_C import obtener_ndvi_valido
+from modules.get_R import factorR_wms
+from modules.get_K import factor_K_williams
+from modules.calc_LS import calcular_LS
 
 def resample_to_reference(source_array, source_transform, source_crs,
                           ref_shape, ref_transform, ref_crs):

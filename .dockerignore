@@ -4,7 +4,7 @@ __pycache__/
 *.gpkg
 *.tif
 *.ipynb
-legacy/
+layers/
 .git/
 .env
 *.lock
