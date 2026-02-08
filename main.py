@@ -14,6 +14,7 @@ import geopandas as gpd
 import rasterio
 from rasterio.warp import reproject, Resampling
 from rasterio.features import rasterize
+from shapely.geometry import box
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,9 +106,68 @@ def guardar_raster(data, transform, crs, filepath, nodata=-9999):
         dst.write(data_out.astype(np.float32), 1)
 
 
-def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0,
-         cambio_r: float = None, cambio_k: float = None, cambio_ls: float = None, cambio_c: float = None):
-    gdf = gpd.read_file(capa)
+def crear_bbox_desde_coordenadas(lat, lon, lado_metros):
+    """
+    Crea un GeoDataFrame con un bbox cuadrado centrado en las coordenadas dadas.
+
+    Args:
+        lat: Latitud (ej: 40.57232729502867)
+        lon: Longitud (ej: -4.403293925819235)
+        lado_metros: Lado del cuadrado en metros (ej: 100 para 100x100m)
+
+    Returns:
+        GeoDataFrame con el bbox en EPSG:4326
+    """
+    from pyproj import Transformer, CRS
+
+    utm_zone = int((lon + 180) / 6) + 1
+    hemisphere = 'north' if lat >= 0 else 'south'
+    utm_crs = CRS.from_dict({
+        'proj': 'utm',
+        'zone': utm_zone,
+        'datum': 'WGS84',
+        hemisphere: True
+    })
+
+    transformer_to_utm = Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
+    transformer_to_wgs = Transformer.from_crs(utm_crs, "EPSG:4326", always_xy=True)
+
+    x_utm, y_utm = transformer_to_utm.transform(lon, lat)
+
+    half_side = lado_metros / 2
+
+    x_min_utm = x_utm - half_side
+    x_max_utm = x_utm + half_side
+    y_min_utm = y_utm - half_side
+    y_max_utm = y_utm + half_side
+
+    lon_min, lat_min = transformer_to_wgs.transform(x_min_utm, y_min_utm)
+    lon_max, lat_max = transformer_to_wgs.transform(x_max_utm, y_max_utm)
+
+    bbox_geom = box(lon_min, lat_min, lon_max, lat_max)
+
+    gdf = gpd.GeoDataFrame([{'geometry': bbox_geom}], crs="EPSG:4326")
+
+    logger.info(f"Bbox creado: centro ({lat:.6f}, {lon:.6f}), lado {lado_metros}m")
+    logger.info(f"  UTM zona {utm_zone}{hemisphere[0].upper()}")
+    logger.info(f"  Coordenadas WGS84: ({lat_min:.6f}, {lon_min:.6f}) a ({lat_max:.6f}, {lon_max:.6f})")
+
+    return gdf
+
+
+def main(capa: str = None, output: str = None, factor_c: list = None, factor_p: float = 1.0,
+         cambio_r: float = None, cambio_k: float = None, cambio_ls: float = None, cambio_c: float = None,
+         coordenadas: tuple = None, lado_bbox: int = None):
+
+    if coordenadas is not None and lado_bbox is not None:
+        lat, lon = coordenadas
+        gdf = crear_bbox_desde_coordenadas(lat, lon, lado_bbox)
+        area_nombre = f"bbox_{lat:.6f}_{lon:.6f}_{lado_bbox}m"
+    elif capa is not None:
+        gdf = gpd.read_file(capa)
+        area_nombre = Path(capa).stem
+    else:
+        raise ValueError("Debe especificar -c/--capa o --coordenadas con --lado-bbox")
 
     logger.info("─" * 60)
     logger.info("CÁLCULO DE RUSLE - A = R * K * LS * C * P")
@@ -279,7 +339,6 @@ def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0,
     logger.info("─" * 60)
 
     try:
-        area_nombre = Path(capa).stem
         raster_path = os.path.join(output, "A_rusle_actual.tif")
         pdf_path = os.path.join(output, "informe_erosion.pdf")
 
@@ -324,7 +383,14 @@ def parse_factor_c(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Cálculo de RUSLE con escenarios de factor C")
-    parser.add_argument("-c", "--capa", required=True, help="Ruta al archivo vectorial (gpkg, shp, geojson...)")
+
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("-c", "--capa", help="Ruta al archivo vectorial (gpkg, shp, geojson...)")
+    input_group.add_argument("--coordenadas", "-coords", nargs=2, type=float, metavar=("LAT", "LON"),
+                            help="Coordenadas del centro (lat, lon) ej: 40.5723 -4.4033")
+
+    parser.add_argument("--lado-bbox", "-l", type=int, metavar="METROS",
+                       help="Lado del bbox en metros (requerido con --coordenadas). Ej: 100 para 100x100m")
     parser.add_argument("-o", "--output", default=None, help="Ruta de la carpeta de salida (default: Descargas/RUSLE_output_YYYYMMDD)")
     parser.add_argument("-fc", "--factor-c", nargs='*', metavar="VAL", help="Valores de C medio/largo plazo. Sin args: C*0.5/C*0.1. Con args: -fc 0.1 0.02 o -fc _ 0.01")
     parser.add_argument("-p", "--factor-p", type=float, default=1.0, help="Valor del factor P (default: 1.0)")
@@ -335,10 +401,20 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if args.coordenadas and not args.lado_bbox:
+        parser.error("--coordenadas requiere --lado-bbox")
+
+    if args.lado_bbox and not args.coordenadas:
+        parser.error("--lado-bbox requiere --coordenadas")
+
     if args.output is None:
-        fecha = datetime.now().strftime("%Y%m%d-%b%H%M")
+        fecha = datetime.now().strftime("%Y%m%d-%H%M")
         args.output = str(Path.home() / "Downloads" / f"RUSLE_output_{fecha}")
 
     factor_c_parsed = parse_factor_c(args.factor_c)
-    main(args.capa, args.output, factor_c_parsed, args.factor_p,
-         args.cambio_r, args.cambio_k, args.cambio_ls, args.cambio_c)
+
+    coordenadas_tuple = tuple(args.coordenadas) if args.coordenadas else None
+
+    main(capa=args.capa, output=args.output, factor_c=factor_c_parsed, factor_p=args.factor_p,
+         cambio_r=args.cambio_r, cambio_k=args.cambio_k, cambio_ls=args.cambio_ls, cambio_c=args.cambio_c,
+         coordenadas=coordenadas_tuple, lado_bbox=args.lado_bbox)
