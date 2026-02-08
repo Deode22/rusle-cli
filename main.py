@@ -4,6 +4,15 @@ Genera tres escenarios de evolución del factor C
 """
 
 import os
+
+venv_proj_path = r"C:\Users\danie\Documents\repos\rusle\.venv\lib\site-packages\pyproj\proj_dir\share\proj"
+
+# Forzamos a GDAL y PROJ a usar esa ruta
+os.environ['PROJ_LIB'] = venv_proj_path
+os.environ['PROJ_DATA'] = venv_proj_path # Para versiones más nuevas de PROJ
+
+import sys
+import logging
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +22,15 @@ import rasterio
 from rasterio.warp import reproject, Resampling
 from rasterio.features import rasterize
 
-from get_mdt import obtener_mdt
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+logger = logging.getLogger(__name__)
+
+from modules.get_mdt import obtener_mdt
 from modules.get_C import obtener_ndvi_valido
 from modules.get_R import factorR_wms
 from modules.get_K import factor_K_williams
@@ -56,7 +73,7 @@ def crear_mascara_gdf(gdf, shape, transform, crs):
     return mask.astype(bool)
 
 
-def eliminar_outliers(data, lower_pct=2.5, upper_pct=97.5):
+def eliminar_outliers(data, lower_pct=1, upper_pct=99):
     """
     Elimina outliers usando percentiles.
     Valores fuera del rango se convierten en NaN.
@@ -94,87 +111,141 @@ def guardar_raster(data, transform, crs, filepath, nodata=-9999):
         dst.write(data_out.astype(np.float32), 1)
 
 
-def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0):
+def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0,
+         cambio_r: float = None, cambio_k: float = None, cambio_ls: float = None, cambio_c: float = None):
     gdf = gpd.read_file(capa)
 
-    print("=" * 60)
-    print("CÁLCULO DE RUSLE - A = R * K * LS * C * P")
-    print("=" * 60)
+    logger.info("─" * 60)
+    logger.info("CÁLCULO DE RUSLE - A = R * K * LS * C * P")
+    logger.info("─" * 60)
 
-    print("\n[1/4] Calculando Factor R (Erosividad)...")
-    _, factor_R = factorR_wms(gdf)
-    print(f"  R = {factor_R:.2f} MJ·mm·ha⁻¹·h⁻¹·año⁻¹")
+    if cambio_r is not None:
+        logger.info(f"\n[1/4] Usando Factor R manual: {cambio_r:.2f} MJ·mm·ha⁻¹·h⁻¹·año⁻¹")
+        factor_R = cambio_r
+    else:
+        logger.info("\n[1/4] Calculando Factor R (Erosividad)...")
+        _, factor_R = factorR_wms(gdf)
+        logger.info(f"  R = {factor_R:.2f} MJ·mm·ha⁻¹·h⁻¹·año⁻¹")
 
-    print("\n[2/4] Calculando Factor K (Erodibilidad del suelo)...")
-    k_result = factor_K_williams(gdf, depth="0-5cm", stat="mean")
-    K_array = k_result['K']
-    K_profile = k_result['profile']
-    print(f"  K mean = {np.nanmean(K_array):.4f} t·h/(MJ·mm)")
+    if cambio_k is not None:
+        logger.info(f"\n[2/4] Usando Factor K manual: {cambio_k:.4f} t·h/(MJ·mm)")
+        K_array = None
+        K_profile = None
+        K_manual = cambio_k
+    else:
+        logger.info("\n[2/4] Calculando Factor K (Erodibilidad del suelo)...")
+        k_result = factor_K_williams(gdf, depth="0-5cm", stat="mean")
+        K_array = k_result['K']
+        K_profile = k_result['profile']
+        K_manual = None
+        logger.info(f"  K mean = {np.nanmean(K_array):.4f} t·h/(MJ·mm)")
 
-    print("\n[3/4] Obteniendo MDT y calculando Factor LS...")
-    mdt_result = obtener_mdt(capa)
-    elevation = mdt_result['data']
-    mdt_transform = mdt_result['transform']
-    mdt_crs = mdt_result['crs']
-    LS_array, _ = calcular_LS(
-        elevation,
-        mdt_transform,
-        gdf,
-        nodata=None,
-        metodo='desmet_govers',  # o 'moore_burch'
-        validar=True
-    )
+    if cambio_ls is not None:
+        logger.info(f"\n[3/4] Usando Factor LS manual: {cambio_ls:.4f}")
+        LS_array = None
+        mdt_transform = None
+        mdt_crs = None
+        LS_manual = cambio_ls
+    else:
+        logger.info("\n[3/4] Obteniendo MDT y calculando Factor LS...")
+        mdt_result = obtener_mdt(capa)
+        elevation = mdt_result['data']
+        mdt_transform = mdt_result['transform']
+        mdt_crs = mdt_result['crs']
+        LS_array, _ = calcular_LS(
+            elevation,
+            mdt_transform,
+            gdf,
+            nodata=None,
+            metodo='desmet_govers',
+            validar=True
+        )
+        LS_manual = None
 
-    print("\n[4/4] Calculando Factor C (Cobertura vegetal)...")
-    _, _, C_array, _, bbox = obtener_ndvi_valido(gdf, dias=90, maxcc=20)
-    if C_array is None:
-        raise ValueError("No se pudo obtener el NDVI/Factor C")
-    C_array = np.clip(C_array, 0, 1)
-    print(f"  C mean = {np.nanmean(C_array):.4f}")
+    if cambio_c is not None:
+        logger.info(f"\n[4/4] Usando Factor C manual: {cambio_c:.4f}")
+        C_array = None
+        bbox = None
+        C_manual = cambio_c
+    else:
+        logger.info("\n[4/4] Calculando Factor C (Cobertura vegetal)...")
+        _, _, C_array, _, bbox = obtener_ndvi_valido(gdf, dias=90, maxcc=20)
+        if C_array is None:
+            raise ValueError("No se pudo obtener el NDVI/Factor C")
+        C_array = np.clip(C_array, 0, 1)
+        C_manual = None
+        logger.info(f"  C mean = {np.nanmean(C_array):.4f}")
 
     P = factor_p
-    print(f"\n  P = {P}")
+    logger.info(f"\n  P = {P}")
 
-    print("\n[Resampleando factores a grilla común...]")
-    ref_shape = C_array.shape
+    logger.info("\n[Resampleando factores a grilla común...]")
 
-    minx, miny, maxx, maxy = bbox
-    ref_transform = rasterio.transform.from_bounds(minx, miny, maxx, maxy, ref_shape[1], ref_shape[0])
-    ref_crs = "EPSG:4326"
+    if C_array is not None:
+        ref_shape = C_array.shape
+        minx, miny, maxx, maxy = bbox
+        ref_transform = rasterio.transform.from_bounds(minx, miny, maxx, maxy, ref_shape[1], ref_shape[0])
+        ref_crs = "EPSG:4326"
+    elif LS_array is not None:
+        ref_shape = LS_array.shape
+        ref_transform = mdt_transform
+        ref_crs = mdt_crs
+    elif K_array is not None:
+        ref_shape = K_array.shape
+        ref_transform = K_profile['transform']
+        ref_crs = K_profile['crs']
+    else:
+        bounds = gdf.total_bounds
+        minx, miny, maxx, maxy = bounds
+        ref_shape = (100, 100)
+        ref_transform = rasterio.transform.from_bounds(minx, miny, maxx, maxy, ref_shape[1], ref_shape[0])
+        ref_crs = gdf.crs
 
-    K_resampled = resample_to_reference(
-        K_array, K_profile['transform'], K_profile['crs'],
-        ref_shape, ref_transform, ref_crs
-    )
+    if K_array is not None:
+        K_resampled = resample_to_reference(
+            K_array, K_profile['transform'], K_profile['crs'],
+            ref_shape, ref_transform, ref_crs
+        )
+    else:
+        K_resampled = np.full(ref_shape, K_manual, dtype=np.float32)
 
-    LS_resampled = resample_to_reference(
-        LS_array, mdt_transform, mdt_crs,
-        ref_shape, ref_transform, ref_crs
-    )
+    if LS_array is not None:
+        LS_resampled = resample_to_reference(
+            LS_array, mdt_transform, mdt_crs,
+            ref_shape, ref_transform, ref_crs
+        )
+    else:
+        LS_resampled = np.full(ref_shape, LS_manual, dtype=np.float32)
 
-    print("\n" + "=" * 60)
-    print("CALCULANDO RUSLE")
-    print("=" * 60)
+    if C_array is None:
+        C_array = np.full(ref_shape, C_manual, dtype=np.float32)
+
+    logger.info("\n" + "─" * 60)
+    logger.info("CALCULANDO RUSLE")
+    logger.info("─" * 60)
 
     mascara_gdf = crear_mascara_gdf(gdf, ref_shape, ref_transform, ref_crs)
 
     A_original = factor_R * K_resampled * LS_resampled * C_array * P
-    print("[Eliminando outliers (percentiles 2.5-97.5)...]")
+    logger.info("[Eliminando outliers (percentiles 2.5-97.5)...]")
     A_original = eliminar_outliers(A_original)
-    print(f"\nEscenario actual (C original): A mean = {np.nanmean(A_original):.4f} t/ha/año")
+    logger.info(f"\nEscenario actual (C original): A mean = {np.nanmean(A_original):.4f} t/ha/año")
 
     os.makedirs(output, exist_ok=True)
-    print(f"\nGuardando rasters en: {output}")
+    logger.info(f"\nGuardando rasters en: {output}")
 
     guardar_raster(A_original, ref_transform, ref_crs,
                    os.path.join(output, "A_rusle_actual.tif"))
-    print("  - A_rusle_actual.tif")
+    logger.info("  - A_rusle_actual.tif")
 
     if factor_c is not None:
         c_medio_val, c_largo_val = factor_c
 
         if c_medio_val is None:
-            C_medio = C_array * 0.5
+            if cambio_c is not None:
+                C_medio = np.full_like(C_array, C_manual * 0.5)
+            else:
+                C_medio = C_array * 0.5
             c_medio_str = "C*0.5"
         else:
             C_medio = np.full_like(C_array, c_medio_val)
@@ -182,7 +253,10 @@ def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0):
         C_medio = np.where(mascara_gdf, C_medio, np.nan)
 
         if c_largo_val is None:
-            C_largo = C_array * 0.1
+            if cambio_c is not None:
+                C_largo = np.full_like(C_array, C_manual * 0.1)
+            else:
+                C_largo = C_array * 0.1
             c_largo_str = "C*0.1"
         else:
             C_largo = np.full_like(C_array, c_largo_val)
@@ -195,20 +269,20 @@ def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0):
         A_medio = eliminar_outliers(A_medio)
         A_largo = eliminar_outliers(A_largo)
 
-        print(f"Escenario medio plazo (C={c_medio_str}): A mean = {np.nanmean(A_medio):.4f} t/ha/año")
-        print(f"Escenario largo plazo (C={c_largo_str}): A mean = {np.nanmean(A_largo):.4f} t/ha/año")
+        logger.info(f"Escenario medio plazo (C={c_medio_str}): A mean = {np.nanmean(A_medio):.4f} t/ha/año")
+        logger.info(f"Escenario largo plazo (C={c_largo_str}): A mean = {np.nanmean(A_largo):.4f} t/ha/año")
 
         guardar_raster(A_medio, ref_transform, ref_crs,
                        os.path.join(output, "A_rusle_medio-plazo.tif"))
-        print("  - A_rusle_medio-plazo.tif")
+        logger.info("  - A_rusle_medio-plazo.tif")
 
         guardar_raster(A_largo, ref_transform, ref_crs,
                        os.path.join(output, "A_rusle_largo-plazo.tif"))
-        print("  - A_rusle_largo-plazo.tif")
+        logger.info("  - A_rusle_largo-plazo.tif")
 
-    print("\n" + "=" * 60)
-    print("PROCESO COMPLETADO")
-    print("=" * 60)
+    logger.info("\n" + "─" * 60)
+    logger.info("PROCESO COMPLETADO")
+    logger.info("─" * 60)
 
 
 def parse_factor_c(args):
@@ -234,6 +308,10 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output", default=None, help="Ruta de la carpeta de salida (default: Descargas/RUSLE_output_YYYYMMDD)")
     parser.add_argument("-fc", "--factor-c", nargs='*', metavar="VAL", help="Valores de C medio/largo plazo. Sin args: C*0.5/C*0.1. Con args: -fc 0.1 0.02 o -fc _ 0.01")
     parser.add_argument("-p", "--factor-p", type=float, default=1.0, help="Valor del factor P (default: 1.0)")
+    parser.add_argument("-cr", "--cambio-r", type=float, default=None, help="Valor manual del factor R (Erosividad)")
+    parser.add_argument("-ck", "--cambio-k", type=float, default=None, help="Valor manual del factor K (Erodibilidad)")
+    parser.add_argument("-cls", "--cambio-ls", type=float, default=None, help="Valor manual del factor LS (Topografía)")
+    parser.add_argument("-cc", "--cambio-c", type=float, default=None, help="Valor manual del factor C (Cobertura)")
 
     args = parser.parse_args()
 
@@ -242,4 +320,5 @@ if __name__ == "__main__":
         args.output = str(Path.home() / "Downloads" / f"RUSLE_output_{fecha}")
 
     factor_c_parsed = parse_factor_c(args.factor_c)
-    main(args.capa, args.output, factor_c_parsed, args.factor_p)
+    main(args.capa, args.output, factor_c_parsed, args.factor_p,
+         args.cambio_r, args.cambio_k, args.cambio_ls, args.cambio_c)

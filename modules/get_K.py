@@ -247,10 +247,9 @@ def factor_K_williams(gdf: gpd.GeoDataFrame, depth="0-5cm", stat="mean"):
             - 'K': array (t·h/(MJ·mm))
             - 'profile': rasterio profile (metadatos geoespaciales)
     """
-    logger.info("=" * 60)
     logger.info("CÁLCULO DEL FACTOR K (ERODIBILIDAD DEL SUELO)")
     logger.info("Método: EPIC - Williams et al. (1990)")
-    logger.info("=" * 60)
+    logger.info("─" * 60)
     logger.info(f"Parámetros: depth={depth}, stat={stat}")
 
     bbox = gdf_to_bbox4326(gdf)
@@ -334,7 +333,7 @@ def factor_K_williams(gdf: gpd.GeoDataFrame, depth="0-5cm", stat="mean"):
 
     logger.info(f"Estadísticas finales - Factor K: min={np.nanmin(k):.4f}, mean={np.nanmean(k):.4f}, max={np.nanmax(k):.4f} t·h/(MJ·mm)")
     logger.info("✓ Cálculo del Factor K completado exitosamente")
-    logger.info("=" * 60)
+    logger.info("─" * 60)
 
     return {
         "sand": sand_arr,
