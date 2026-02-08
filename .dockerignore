@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.gpkg
+*.tif
+*.ipynb
+legacy/
+.git/
+.env
+*.lock
+.venv/
+venv/

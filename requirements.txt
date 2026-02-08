@@ -1,0 +1,23 @@
+# Google Earth Engine API
+earthengine-api>=0.1.370
+
+# Ciencia de datos y cálculos numéricos
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+
+# Visualización
+matplotlib>=3.7.0
+folium>=0.14.0
+
+# Geoespacial
+rasterio>=1.3.0
+shapely>=2.0.0
+geopandas>=0.12.0
+pyproj>=3.5.0
+cdsapi>=0.5.1
+xarray>=2023.0.0
+
+# Utilidades
+python-dotenv>=1.0.0
+requests>=2.31.0
