@@ -1,9 +1,7 @@
 import os
 import sys
 
-venv_proj_path = r"C:\Users\danie\Documents\repos\rusle\.venv\lib\site-packages\pyproj\proj_dir\share\proj"
-os.environ['PROJ_LIB'] = venv_proj_path
-os.environ['PROJ_DATA'] = venv_proj_path
+
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 

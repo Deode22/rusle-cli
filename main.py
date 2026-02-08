@@ -4,13 +4,6 @@ Genera tres escenarios de evolución del factor C
 """
 
 import os
-
-venv_proj_path = r"C:\Users\danie\Documents\repos\rusle\.venv\lib\site-packages\pyproj\proj_dir\share\proj"
-
-# Forzamos a GDAL y PROJ a usar esa ruta
-os.environ['PROJ_LIB'] = venv_proj_path
-os.environ['PROJ_DATA'] = venv_proj_path # Para versiones más nuevas de PROJ
-
 import sys
 import logging
 import argparse
