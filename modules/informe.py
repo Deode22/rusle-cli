@@ -102,10 +102,28 @@ def calcular_estadisticas(array):
     }
 
 
-def interpretar_erosion(media, maximo):
-    """Interpreta los niveles de erosión según valores medios y máximos"""
+def interpretar_erosion(A_array):
+    """Interpreta los niveles de erosión según valores medios y máximos
+
+    Calcula la media solo de valores entre 0-200 para evitar sesgos por
+    afloramientos rocosos o anomalías del terreno.
+    """
+    A_valido = A_array[~np.isnan(A_array)]
+
+    if len(A_valido) == 0:
+        return "No hay datos válidos para interpretar."
+
+    maximo = float(np.max(A_valido))
+    A_normal = A_valido[(A_valido >= 0) & (A_valido <= 200)]
+
+    if len(A_normal) == 0:
+        return "Todos los valores están fuera del rango normal (0-200 T/ha/año)."
+
+    media = float(np.mean(A_normal))
+    porcentaje_extremo = (len(A_valido) - len(A_normal)) / len(A_valido) * 100
+
     interpretaciones = []
-    
+
     if media < 5:
         interpretaciones.append("El área presenta niveles de erosión muy bajos en promedio.")
     elif media < 12:
@@ -116,14 +134,22 @@ def interpretar_erosion(media, maximo):
         interpretaciones.append("El área presenta niveles de erosión altos en promedio.")
     else:
         interpretaciones.append("El área presenta niveles de erosión muy altos en promedio.")
-    
+
     if maximo > 200:
-        interpretaciones.append("Se detectan zonas críticas con pérdidas superiores a 200 T/ha/año que requieren intervención urgente.")
+        if porcentaje_extremo > 1:
+            interpretaciones.append(
+                f"Se detectan valores superiores a 200 T/ha/año ({porcentaje_extremo:.1f}% del área), "
+                "que pueden deberse a afloramientos rocosos, zonas sin vegetación o interrupciones "
+                "del medio que estarían sesgando los resultados. La interpretación se basa en la media "
+                f"de valores entre 0-200 T/ha/año ({media:.2f} T/ha/año)."
+            )
+        else:
+            interpretaciones.append("Se detectan zonas críticas con pérdidas superiores a 200 T/ha/año que requieren intervención urgente.")
     elif maximo > 100:
         interpretaciones.append("Se detectan zonas con pérdidas severas superiores a 100 T/ha/año.")
     elif maximo > 50:
         interpretaciones.append("Se detectan zonas con pérdidas altas que requieren medidas de conservación.")
-    
+
     return " ".join(interpretaciones)
 
 
@@ -202,6 +228,7 @@ def generar_mapa_erosion(raster_path, output_path, bounds=None):
         crs = src.crs
         
         # Clasificar datos
+        import numpy as np
         classified = np.full_like(data, np.nan, dtype=float)
         classified[(data >= 0) & (data < 5)] = 1
         classified[(data >= 5) & (data < 12)] = 2
@@ -249,16 +276,7 @@ def generar_mapa_erosion(raster_path, output_path, bounds=None):
                    xycoords='axes fraction', fontsize=12, weight='bold',
                    ha='center', va='center',
                    arrowprops=dict(arrowstyle='->', lw=1.5, color='black'))
-        
-        # Barra de escala (aproximada)
-        try:
-            from matplotlib_scalebar.scalebar import ScaleBar
-            scalebar = ScaleBar(abs(transform[0]), location='lower left', 
-                              box_alpha=0.7, color='black', font_properties={'size': 7})
-            ax.add_artist(scalebar)
-        except:
-            pass
-        
+
         # Título
         ax.set_title('Mapa de pérdidas de suelo', fontsize=11, weight='bold', pad=12)
         
@@ -956,7 +974,7 @@ def generar_informe_rusle(
     story.append(Spacer(1, 0.3*cm))
     
     # Interpretación
-    interpretacion = interpretar_erosion(stats_A["media"], stats_A["maximo"])
+    interpretacion = interpretar_erosion(A_array)
     story.append(Paragraph(interpretacion, style_body))
     
     # Página de gráficas
@@ -1019,6 +1037,7 @@ def generar_informe_rusle(
         pass
 
 
+""" 
 # Ejemplo de uso
 if __name__ == "__main__":
     import numpy as np
@@ -1045,4 +1064,5 @@ if __name__ == "__main__":
         A_array=A_array,
         metodo_LS="Desmet & Govers (1996)",
         raster_path=r"C:\Users\danie\Downloads\RUSLE_output_20260208-Feb1835\A_rusle_actual.tif"
-    )
+    ) 
+"""

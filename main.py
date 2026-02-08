@@ -28,6 +28,7 @@ from modules.get_C import obtener_ndvi_valido
 from modules.get_R import factorR_wms
 from modules.get_K import factor_K_williams
 from modules.calc_LS import calcular_LS
+from modules.informe import generar_informe_rusle
 
 def resample_to_reference(source_array, source_transform, source_crs,
                           ref_shape, ref_transform, ref_crs):
@@ -272,6 +273,32 @@ def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0,
         guardar_raster(A_largo, ref_transform, ref_crs,
                        os.path.join(output, "A_rusle_largo-plazo.tif"))
         logger.info("  - A_rusle_largo-plazo.tif")
+
+    logger.info("\n" + "─" * 60)
+    logger.info("GENERANDO INFORME PDF")
+    logger.info("─" * 60)
+
+    try:
+        area_nombre = Path(capa).stem
+        raster_path = os.path.join(output, "A_rusle_actual.tif")
+        pdf_path = os.path.join(output, "informe_erosion.pdf")
+
+        generar_informe_rusle(
+            output_pdf=pdf_path,
+            area_nombre=area_nombre,
+            R_value=factor_R,
+            K_array=K_resampled,
+            LS_array=LS_resampled,
+            C_array=C_array,
+            P_value=P,
+            A_array=A_original,
+            metodo_LS="Desmet & Govers (1996)",
+            raster_path=raster_path
+        )
+        logger.info(f"  - informe_erosion.pdf")
+    except Exception as e:
+        logger.error(f"Error al generar informe PDF: {e}")
+        logger.info("  (Continuando sin informe)")
 
     logger.info("\n" + "─" * 60)
     logger.info("PROCESO COMPLETADO")
