@@ -66,7 +66,7 @@ def crear_mascara_gdf(gdf, shape, transform, crs):
     return mask.astype(bool)
 
 
-def eliminar_outliers(data, lower_pct=1, upper_pct=99):
+def eliminar_outliers(data, lower_pct=0.1, upper_pct=99.9):
     """
     Elimina outliers usando percentiles.
     Valores fuera del rango se convierten en NaN.
@@ -220,7 +220,7 @@ def main(capa: str, output: str, factor_c: list = None, factor_p: float = 1.0,
     mascara_gdf = crear_mascara_gdf(gdf, ref_shape, ref_transform, ref_crs)
 
     A_original = factor_R * K_resampled * LS_resampled * C_array * P
-    logger.info("[Eliminando outliers (percentiles 2.5-97.5)...]")
+    logger.info("[Eliminando outliers...]")
     A_original = eliminar_outliers(A_original)
     logger.info(f"\nEscenario actual (C original): A mean = {np.nanmean(A_original):.4f} t/ha/año")
 
@@ -309,7 +309,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.output is None:
-        fecha = datetime.now().strftime("%Y%m%d")
+        fecha = datetime.now().strftime("%Y%m%d-%b%H%M")
         args.output = str(Path.home() / "Downloads" / f"RUSLE_output_{fecha}")
 
     factor_c_parsed = parse_factor_c(args.factor_c)

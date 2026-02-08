@@ -8,6 +8,7 @@ pandas>=2.0.0
 
 # Visualización
 matplotlib>=3.7.0
+matplotlib-scalebar
 folium>=0.14.0
 
 # Geoespacial
@@ -23,3 +24,5 @@ owslib>=0.25.0
 # Utilidades
 python-dotenv>=1.0.0
 requests>=2.31.0
+reportlab
+contextily

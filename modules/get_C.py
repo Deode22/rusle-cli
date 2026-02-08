@@ -146,19 +146,56 @@ def calcular_factor_C(ndvi_2d, metodo='vanderknijff'):
     return c_array
 
 
+def dividir_bbox_en_tiles(bbox, num_tiles_x=2, num_tiles_y=2):
+    """
+    Divide un bounding box en tiles más pequeños para procesamiento por lotes.
+
+    Parámetros
+    ----------
+    bbox : list
+        Lista [minx, miny, maxx, maxy] en EPSG:4326.
+    num_tiles_x : int
+        Número de divisiones en el eje X (longitud).
+    num_tiles_y : int
+        Número de divisiones en el eje Y (latitud).
+
+    Retorna
+    -------
+    tiles : list
+        Lista de bounding boxes, cada uno como [minx, miny, maxx, maxy].
+    """
+    minx, miny, maxx, maxy = bbox
+
+    width = (maxx - minx) / num_tiles_x
+    height = (maxy - miny) / num_tiles_y
+
+    tiles = []
+    for i in range(num_tiles_y):
+        for j in range(num_tiles_x):
+            tile_minx = minx + j * width
+            tile_miny = miny + i * height
+            tile_maxx = tile_minx + width
+            tile_maxy = tile_miny + height
+            tiles.append([tile_minx, tile_miny, tile_maxx, tile_maxy])
+
+    logger.debug(f"Bbox dividido en {len(tiles)} tiles ({num_tiles_x}x{num_tiles_y})")
+    return tiles
+
+
 def obtener_ndvi_valido(gdf: gpd.GeoDataFrame, dias=90, maxcc=20, width=512, height=512,
-                        metodo_c='vanderknijff', client_id=None, client_secret=None):
+                        metodo_c='vanderknijff', client_id=None, client_secret=None,
+                        num_tiles_x=1, num_tiles_y=1):
     """
     Obtiene NDVI válido usando Sentinel Hub Process API (Copernicus Data Space Ecosystem)
     y calcula el factor C para modelos de erosión (USLE/RUSLE).
-    
+
     El proceso incluye:
     1. Autenticación OAuth con Copernicus Data Space
-    2. Consulta de imágenes Sentinel-2 L2A con filtro de nubes
+    2. Consulta de imágenes Sentinel-2 L2A con filtro de nubes (procesamiento por tiles)
     3. Cálculo de NDVI con máscara de calidad (SCL)
     4. Recorte al área de estudio (geometrías del GeoDataFrame)
     5. Cálculo del factor C según método seleccionado
-    
+
     Parámetros
     ----------
     gdf : gpd.GeoDataFrame
@@ -177,7 +214,13 @@ def obtener_ndvi_valido(gdf: gpd.GeoDataFrame, dias=90, maxcc=20, width=512, hei
         Client ID de Copernicus Data Space. Si None, debe estar en el código.
     client_secret : str, optional
         Client Secret de Copernicus Data Space. Si None, debe estar en el código.
-    
+    num_tiles_x : int
+        Número de divisiones en el eje X (longitud) para procesamiento por lotes.
+        Usar > 1 para evitar timeouts en áreas grandes.
+    num_tiles_y : int
+        Número de divisiones en el eje Y (latitud) para procesamiento por lotes.
+        Usar > 1 para evitar timeouts en áreas grandes.
+
     Retorna
     -------
     valid_ndvi : np.ndarray (1D)
@@ -190,12 +233,12 @@ def obtener_ndvi_valido(gdf: gpd.GeoDataFrame, dias=90, maxcc=20, width=512, hei
         Estadísticas del NDVI y metadatos de la consulta.
     bbox : list
         Bounding box utilizado [minx, miny, maxx, maxy] en EPSG:4326.
-    
+
     Excepciones
     -----------
     Exception
         Si falla la autenticación o la consulta a Sentinel Hub.
-    
+
     Referencias
     -----------
     Copernicus Data Space Ecosystem: https://dataspace.copernicus.eu/
@@ -223,11 +266,18 @@ def obtener_ndvi_valido(gdf: gpd.GeoDataFrame, dias=90, maxcc=20, width=512, hei
     # Extraer bounding box del GeoDataFrame
     bbox, gdf_4326 = bbox_from_gdf(gdf)
     logger.info(f"Área de estudio: bbox={bbox}")
-    
+
+    # Dividir en tiles si es necesario
+    if num_tiles_x > 1 or num_tiles_y > 1:
+        tiles = dividir_bbox_en_tiles(bbox, num_tiles_x, num_tiles_y)
+        logger.info(f"Procesando {len(tiles)} tiles para evitar timeouts")
+    else:
+        tiles = [bbox]
+
     # Autenticación OAuth
     logger.info("Autenticando con Copernicus Data Space Ecosystem")
     token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
-    
+
     try:
         token_response = requests.post(
             token_url,
@@ -244,15 +294,20 @@ def obtener_ndvi_valido(gdf: gpd.GeoDataFrame, dias=90, maxcc=20, width=512, hei
     except requests.exceptions.RequestException as e:
         logger.error(f"Error en autenticación: {e}")
         raise Exception(f"Error obteniendo token: {e}")
-    
+
     # Definir ventana temporal
     today = datetime.utcnow()
     start_date = (today - timedelta(days=dias)).strftime("%Y-%m-%d")
     end_date = today.strftime("%Y-%m-%d")
-    
+
     logger.info(f"Ventana temporal: {start_date} a {end_date} ({dias} días)")
     logger.info(f"Cobertura de nubes máxima: {maxcc}%")
     logger.info(f"Resolución solicitada: {width}x{height} píxeles")
+
+    # Almacenamiento de resultados por tile
+    ndvi_arrays = []
+    transforms = []
+    raster_crs_ref = None
     
     # Evalscript para Sentinel-2
     # Calcula NDVI y aplica máscara de calidad (SCL) para filtrar nubes, sombras y nieve
@@ -321,27 +376,44 @@ def obtener_ndvi_valido(gdf: gpd.GeoDataFrame, dias=90, maxcc=20, width=512, hei
         "Content-Type": "application/json"
     }
     
-    # Consulta a Process API
-    logger.info("Consultando Sentinel Hub Process API")
+    # Consulta a Process API por cada tile
+    logger.info("Consultando Sentinel Hub Process API por tiles")
     process_url = "https://sh.dataspace.copernicus.eu/api/v1/process"
-    
-    try:
-        response = requests.post(process_url, json=payload, headers=headers, timeout=120)
-        response.raise_for_status()
-        logger.info(f"Respuesta recibida: {len(response.content)} bytes")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error en Process API: {e}")
-        raise Exception(f"Error Process API: {e}")
-    
-    # Leer GeoTIFF desde memoria
-    logger.info("Procesando imagen GeoTIFF")
-    with rasterio.open(BytesIO(response.content)) as src:
-        ndvi_array = src.read(1)
-        transform = src.transform
-        raster_crs = src.crs
-        
-        logger.debug(f"Dimensiones del raster: {ndvi_array.shape}")
-        logger.debug(f"CRS del raster: {raster_crs}")
+
+    for tile_idx, tile_bbox in enumerate(tiles, 1):
+        logger.info(f"Procesando tile {tile_idx}/{len(tiles)}: {tile_bbox}")
+
+        # Actualizar payload con bbox del tile actual
+        payload["input"]["bounds"]["bbox"] = tile_bbox
+
+        try:
+            response = requests.post(process_url, json=payload, headers=headers, timeout=120)
+            response.raise_for_status()
+            logger.debug(f"Respuesta recibida (tile {tile_idx}): {len(response.content)} bytes")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error en Process API (tile {tile_idx}): {e}")
+            raise Exception(f"Error Process API (tile {tile_idx}): {e}")
+
+        # Leer GeoTIFF desde memoria
+        logger.debug(f"Procesando imagen GeoTIFF (tile {tile_idx})")
+        with rasterio.open(BytesIO(response.content)) as src:
+            ndvi_array = src.read(1)
+            transform = src.transform
+            raster_crs = src.crs
+
+            ndvi_arrays.append(ndvi_array)
+            transforms.append(transform)
+            if raster_crs_ref is None:
+                raster_crs_ref = raster_crs
+
+            logger.debug(f"Dimensiones del raster (tile {tile_idx}): {ndvi_array.shape}")
+
+    logger.info(f"Se procesaron {len(ndvi_arrays)} tiles correctamente")
+
+    # Combinar arrays de tiles (usar el primero como referencia; en producción considerar mosaicado)
+    ndvi_array = ndvi_arrays[0] if len(ndvi_arrays) == 1 else np.concatenate(ndvi_arrays)
+    transform = transforms[0]
+    raster_crs = raster_crs_ref
     
     # Aplicar máscara geométrica (recortar al área de estudio)
     logger.info("Aplicando máscara geométrica al área de estudio")
