@@ -1,0 +1,10 @@
+# Excluir archivos Markdown de las estadísticas de lenguaje
+*.md linguist-documentation
+
+# Excluir el Dockerfile y archivos de configuración
+Dockerfile linguist-vendored
+.env linguist-vendored
+.gitattributes linguist-vendored
+
+# Asegurar que los archivos .py se cuenten como Python (opcional, suele ser automático)
+*.py linguist-detectable
