@@ -255,9 +255,12 @@ def generar_mapa_erosion(raster_path, output_path, bounds=None):
         
         # Grid
         ax.grid(True, color='gray', linestyle='--', linewidth=0.5, alpha=0.4)
-        ax.set_xlabel('Longitud', fontsize=9)
-        ax.set_ylabel('Latitud', fontsize=9)
-        ax.tick_params(labelsize=8)
+        ax.set_xlabel('Este (m)', fontsize=9)
+        ax.set_ylabel('Norte (m)', fontsize=9)
+        ax.ticklabel_format(style='plain', axis='both')
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}'))
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}'))
+        ax.tick_params(labelsize=7, rotation=0)
         
         # Leyenda
         labels = ['0-5', '5-12', '12-25', '25-50', '50-100', '100-200', '>200']

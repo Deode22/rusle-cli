@@ -31,13 +31,45 @@ from modules.get_K import factor_K_williams
 from modules.calc_LS import calcular_LS
 from modules.informe import generar_informe_rusle
 
+def crear_grilla_utm_10m(gdf, resolucion=10):
+    """
+    Construye una grilla UTM a 10m de resolución desde los límites del GeoDataFrame.
+    """
+    from pyproj import CRS, Transformer
+    bounds_4326 = gdf.to_crs("EPSG:4326").total_bounds
+    lon_center = (bounds_4326[0] + bounds_4326[2]) / 2
+    lat_center = (bounds_4326[1] + bounds_4326[3]) / 2
+    utm_zone = int((lon_center + 180) / 6) + 1
+    hemisphere = 'north' if lat_center >= 0 else 'south'
+    utm_crs = CRS.from_dict({
+        'proj': 'utm', 'zone': utm_zone, 'datum': 'WGS84', hemisphere: True
+    })
+
+    transformer = Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
+    x_min, y_min = transformer.transform(bounds_4326[0], bounds_4326[1])
+    x_max, y_max = transformer.transform(bounds_4326[2], bounds_4326[3])
+
+    x_min = np.floor(x_min / resolucion) * resolucion
+    y_max = np.ceil(y_max / resolucion) * resolucion
+
+    ncols = int(np.ceil((x_max - x_min) / resolucion))
+    nrows = int(np.ceil((y_max - y_min) / resolucion))
+
+    ref_transform = rasterio.transform.from_origin(x_min, y_max, resolucion, resolucion)
+    ref_shape = (nrows, ncols)
+
+    logger.info(f"Grilla UTM {utm_zone}{hemisphere[0].upper()} a {resolucion}m: {ncols}x{nrows} px")
+    return ref_shape, ref_transform, utm_crs
+
+
 def resample_to_reference(source_array, source_transform, source_crs,
-                          ref_shape, ref_transform, ref_crs):
+                          ref_shape, ref_transform, ref_crs,
+                          resampling=Resampling.bilinear):
     """
     Resamplea un array para que coincida con una referencia.
     """
     dst = np.empty(ref_shape, dtype=np.float32)
-    
+
     reproject(
         source=source_array.astype(np.float32),
         destination=dst,
@@ -45,9 +77,9 @@ def resample_to_reference(source_array, source_transform, source_crs,
         src_crs=source_crs,
         dst_transform=ref_transform,
         dst_crs=ref_crs,
-        resampling=Resampling.bilinear
+        resampling=resampling
     )
-    
+
     return dst
 
 
@@ -241,32 +273,15 @@ def main(capa: str = None, output: str = None, factor_c: list = None, factor_p: 
     P = factor_p
     logger.info(f"\n  P = {P}")
 
-    logger.info("\n[Resampleando factores a grilla común...]")
+    logger.info("\n[Resampleando factores a grilla UTM 10m...]")
 
-    if C_array is not None:
-        ref_shape = C_array.shape
-        minx, miny, maxx, maxy = bbox
-        ref_transform = rasterio.transform.from_bounds(minx, miny, maxx, maxy, ref_shape[1], ref_shape[0])
-        ref_crs = "EPSG:4326"
-    elif LS_array is not None:
-        ref_shape = LS_array.shape
-        ref_transform = mdt_transform
-        ref_crs = mdt_crs
-    elif K_array is not None:
-        ref_shape = K_array.shape
-        ref_transform = K_profile['transform']
-        ref_crs = K_profile['crs']
-    else:
-        bounds = gdf.total_bounds
-        minx, miny, maxx, maxy = bounds
-        ref_shape = (100, 100)
-        ref_transform = rasterio.transform.from_bounds(minx, miny, maxx, maxy, ref_shape[1], ref_shape[0])
-        ref_crs = gdf.crs
+    ref_shape, ref_transform, ref_crs = crear_grilla_utm_10m(gdf, resolucion=10)
 
     if K_array is not None:
         K_resampled = resample_to_reference(
             K_array, K_profile['transform'], K_profile['crs'],
-            ref_shape, ref_transform, ref_crs
+            ref_shape, ref_transform, ref_crs,
+            resampling=Resampling.cubic
         )
     else:
         K_resampled = np.full(ref_shape, K_manual, dtype=np.float32)
@@ -274,13 +289,24 @@ def main(capa: str = None, output: str = None, factor_c: list = None, factor_p: 
     if LS_array is not None:
         LS_resampled = resample_to_reference(
             LS_array, mdt_transform, mdt_crs,
-            ref_shape, ref_transform, ref_crs
+            ref_shape, ref_transform, ref_crs,
+            resampling=Resampling.bilinear
         )
     else:
         LS_resampled = np.full(ref_shape, LS_manual, dtype=np.float32)
 
-    if C_array is None:
-        C_array = np.full(ref_shape, C_manual, dtype=np.float32)
+    if C_array is not None:
+        c_minx, c_miny, c_maxx, c_maxy = bbox
+        c_transform = rasterio.transform.from_bounds(
+            c_minx, c_miny, c_maxx, c_maxy, C_array.shape[1], C_array.shape[0]
+        )
+        C_resampled = resample_to_reference(
+            C_array, c_transform, "EPSG:4326",
+            ref_shape, ref_transform, ref_crs,
+            resampling=Resampling.bilinear
+        )
+    else:
+        C_resampled = np.full(ref_shape, C_manual, dtype=np.float32)
 
     logger.info("\n" + "─" * 60)
     logger.info("CALCULANDO RUSLE")
@@ -288,7 +314,7 @@ def main(capa: str = None, output: str = None, factor_c: list = None, factor_p: 
 
     mascara_gdf = crear_mascara_gdf(gdf, ref_shape, ref_transform, ref_crs)
 
-    A_original = factor_R * K_resampled * LS_resampled * C_array * P
+    A_original = factor_R * K_resampled * LS_resampled * C_resampled * P
     logger.info("[Eliminando outliers...]")
     A_original = eliminar_outliers(A_original)
     logger.info(f"\nEscenario actual (C original): A mean = {np.nanmean(A_original):.4f} t/ha/año")
@@ -305,23 +331,23 @@ def main(capa: str = None, output: str = None, factor_c: list = None, factor_p: 
 
         if c_medio_val is None:
             if cambio_c is not None:
-                C_medio = np.full_like(C_array, C_manual * 0.5)
+                C_medio = np.full_like(C_resampled, C_manual * 0.5)
             else:
-                C_medio = C_array * 0.5
+                C_medio = C_resampled * 0.5
             c_medio_str = "C*0.5"
         else:
-            C_medio = np.full_like(C_array, c_medio_val)
+            C_medio = np.full_like(C_resampled, c_medio_val)
             c_medio_str = str(c_medio_val)
         C_medio = np.where(mascara_gdf, C_medio, np.nan)
 
         if c_largo_val is None:
             if cambio_c is not None:
-                C_largo = np.full_like(C_array, C_manual * 0.1)
+                C_largo = np.full_like(C_resampled, C_manual * 0.1)
             else:
-                C_largo = C_array * 0.1
+                C_largo = C_resampled * 0.1
             c_largo_str = "C*0.1"
         else:
-            C_largo = np.full_like(C_array, c_largo_val)
+            C_largo = np.full_like(C_resampled, c_largo_val)
             c_largo_str = str(c_largo_val)
         C_largo = np.where(mascara_gdf, C_largo, np.nan)
 
@@ -355,7 +381,7 @@ def main(capa: str = None, output: str = None, factor_c: list = None, factor_p: 
             R_value=factor_R,
             K_array=K_resampled,
             LS_array=LS_resampled,
-            C_array=C_array,
+            C_array=C_resampled,
             P_value=P,
             A_array=A_original,
             metodo_LS="Desmet & Govers (1996)",
